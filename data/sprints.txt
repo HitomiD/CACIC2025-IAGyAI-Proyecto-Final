@@ -1,0 +1,7 @@
+Sprint 1 - Módulo de Autenticación:
+
+- Implementada autencicación basada en JWT.
+- Testing inicial reveló problemas de latencia en el inicio de sesión.
+- El equipo decidió posponer la integración del [session analytics].
+- Despliegue exitoso con un rollback menor por un bug de cacheo.
+
