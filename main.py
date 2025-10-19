@@ -118,15 +118,6 @@ def create_or_load_vectorstore(documents: list[Document], embedding_model) -> Ch
     return vectorstore
 
 # --- 4. DEFINICIÓN DE HERRAMIENTAS ---
-'''
-@tool
-def off_topic_tool():
-    """
-    Se activa cuando el usuario pregunta algo no relacionado con el restaurante,
-    el menú, los precios o los horarios.
-    """
-    return "Disculpe, como mozo virtual de 'La Delicia', solo puedo responder preguntas sobre nuestro menú y servicios. ¿Le gustaría saber algo sobre nuestros platos?"
-'''
 
 def define_tools(vectorstore: Chroma) -> list:
     """Define las herramientas que el agente mozo podrá utilizar."""
@@ -149,7 +140,7 @@ class AgentState(TypedDict):
     next: str
     instruction: str
 
-
+# Nodo agente RAG
 def agent_node(state: AgentState, llm):
     """Invoca al LLM con el rol de mozo para que decida el siguiente paso."""
     system_prompt = """
@@ -168,12 +159,13 @@ def agent_node(state: AgentState, llm):
     response = llm.invoke(messages)
     return {"messages": [response]}
 
+# Nodo para prompts no relacionados al contexto
 def off_topic_node(state: AgentState) -> dict:
     """Returns a default message when the query is unrelated."""
     message = "Disculpe, como mozo virtual de 'La Delicia', solo puedo responder preguntas sobre nuestro menú y servicios."
     return {"messages": state["messages"] + [HumanMessage(content=message)]}
 
-
+# Nodo supervisor
 def supervisor_node(state: AgentState, supervisor_llm):
     """Invoca al LLM con el rol de supervisor para que decida el siguiente paso."""
     system_prompt = """
@@ -189,10 +181,8 @@ def supervisor_node(state: AgentState, supervisor_llm):
      # Combina el prompt de sistema con el historial de mensajes
     supervisor_messages = [SystemMessage(content=system_prompt)] + state["messages"]
 
-    # Llama al LLM supervisor
-    #response = supervisor_llm.invoke(supervisor_messages)
 
-    # Llama al LLM supervisor
+    # Llama al LLM supervisor con el output estructurado
     response: SupervisorOutput = supervisor_llm.invoke(supervisor_messages)
 
     return {
@@ -201,14 +191,15 @@ def supervisor_node(state: AgentState, supervisor_llm):
     }
 
 
+# Paso 4: Definir el enrutamiento/lógica condicional y los nodos
+
 def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
     """Determina si se debe llamar a una herramienta o si el flujo ha terminado."""
     if state["messages"][-1].tool_calls:
         return "tools"
     return "__end__"
 
-# Paso 4: Definir el Enrutamiento Condicional
-# Esta función actúa como el nodo "Condition" de Flowise.
+# Enrutador para el supervisor
 def router(state: AgentState) -> str:
     """Dirige el flujo al siguiente nodo basado en la decisión del supervisor."""
     if state["next"] == "rag_agent":
@@ -220,43 +211,47 @@ def router(state: AgentState) -> str:
 
 
 def build_graph(supervisor_llm, agent_llm, tools_list):
-    """Construye y compila el grafo del agente mozo."""
-
+    """Construye y compila el grafo del sistema multiagente mozo."""
+    
+    # Declaración de estado a compartir
     graph = StateGraph(AgentState)
 
+    # Añadir todos los nodos al grafo
     graph.add_node("supervisor_node", lambda state: supervisor_node(state, supervisor_llm))
     graph.add_node("agent_node", lambda state: agent_node(state, agent_llm))
     graph.add_node("tools", ToolNode(tools_list))
-    #graph.add_node("off_topic_node", lambda state: off_topic_node(state))
     graph.add_node("off_topic_node", off_topic_node)
 
 
     graph.set_entry_point("supervisor_node")
     
+    # Aristas condicionales del agente RAG
     graph.add_conditional_edges(
         "agent_node", 
         should_continue, 
         {"tools": "tools",
          "__end__": END}
     )
-    
-    # Añadir los bordes condicionales
+
+    # Aristas condicionales del supervisor
     graph.add_conditional_edges(
         "supervisor_node",
         router,
         {
             "rag_agent": "agent_node",
-            "off_topic_node": "off_topic_node", #Mappear al nodo que contiene la herramienta 
+            "off_topic_node": "off_topic_node", 
             "__end__": END
         }
     )
-    graph.add_edge("tools", "agent_node")
-    graph.add_edge("off_topic_node", END)
-    #graph.add_edge("agent_node", "supervisor_node")
+
+    #Añadir aristas no condicionales
+    graph.add_edge("tools", "agent_node") #Volver al agente luego de ejecutar herramienta
+    graph.add_edge("off_topic_node", END) #Terminar ciclo al preguntar off_topic
 
 
     print("🧠 Grafo del mozo virtual construido y compilado.")
     return graph.compile()
+
 
 # --- 6. EJECUCIÓN PRINCIPAL ---
 
@@ -268,30 +263,33 @@ if __name__ == "__main__":
         next: Literal["rag_agent", "off_topic"]
         instruction: str
 
+    # Definicion de modelos para cada agente
     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash",
                                  google_api_key=os.getenv("GEMINI_API_KEY"), 
                                  temperature=0)
     supervisor_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash",
                                  google_api_key=os.getenv("GEMINI_API_KEY"), 
-                                 temperature=0).with_structured_output(SupervisorOutput)
+                                 temperature=0).with_structured_output(SupervisorOutput) #Salida estructurada en formato SupervisorOutput
     embedding_model = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001",
                                                    google_api_key=os.getenv("GEMINI_API_KEY"))
 
+    # Carga de banco de conocimiento
     documents = load_documents()
     vectorstore = create_or_load_vectorstore(documents, embedding_model)
-    tools = define_tools(vectorstore)
     
+    # Definición y binding de tools
+    tools = define_tools(vectorstore)
     rag_agent_llm = llm.bind_tools(tools)
-
-
 
 
     rag_agent = build_graph(supervisor_llm, rag_agent_llm, tools)
 
+    #Generar y guardar imagen en ./img
     with open("img/agent_workflow.png", "wb") as f:
         f.write(rag_agent.get_graph().draw_mermaid_png())
 
-     # MODIFICACIÓN: Añadimos una lista para mantener el historial de la conversación.
+    
+    # Lista para mantener el historial de la conversación.
     conversation_history = []
     
     print("\n\n" + "="*50)
@@ -300,6 +298,7 @@ if __name__ == "__main__":
     print("\nBruno, tu mozo virtual, está listo para atenderte.")
     print(" (Escribe 'salir' para terminar la conversación)")
 
+    # Bucle principal
     while True:
         query = input("\n👤 Cliente: ")
         if query.lower() in ["exit", "quit", "salir"]:
