@@ -3,19 +3,22 @@
 
 
 """
-Este script implementa un agente conversacional que simula ser un mozo virtual
-llamado "Bruno" para el restaurante "La Delicia". Utiliza LangGraph y un sistema RAG.
+Este script implementa un agente conversacional que simula ser un asistente virtual
+llamado "Astor" para un equipo de desarrollo de nombre clave "Argentum".
+Es un sistema multiagente que incluye RAG, generación de reportes con conexión a Notion
+y monitoreo con langsmith.
 
 Funcionalidades principales:
-1.  Carga de un menú detallado y datos del restaurante como documentos.
+1.  Carga de registros como reuniones, sprints e incidentes.
 2.  Creación de una base de datos vectorial (Chroma) persistente con la información
-    del menú para realizar consultas semánticas.
-3.  Definición de un LLM (Gemini 1.5 Flash) con el rol de un mozo.
+    de los registros para realizar consultas semánticas.
+3.  Definición de un LLM (Gemini) con el rol de asistente y de generador de reportes.
+4.  Integración con Notion para la persistencia de los reportes.
 4.  Herramientas:
     - Un 'retriever' para buscar en el menú.
-    - Una herramienta 'off_topic' para manejar preguntas no relacionadas.
+    - Una herramienta [NOTION]
 5.  Construcción de un grafo con LangGraph para orquestar la conversación y el uso de herramientas (patrón ReAct).
-6.  Un bucle interactivo para chatear con "Bruno".
+6.  Funcionamiento a partir de un bucle iterativo.
 """
 import os
 from typing import Sequence, Annotated, TypedDict, Literal
@@ -52,58 +55,39 @@ def setup_environment():
 # --- 2. CARGA DE DATOS DEL RESTAURANTE (MENÚ) ---
 
 def load_documents() -> list[Document]:
-    """Carga los documentos que representan el menú y la información del restaurante."""
+    """Carga los documentos que representan los registros del proyecto."""
     
+    with open("./data/incidentes.txt", encoding='utf-8') as file:
+        texto_incidentes = file.read()
+    with open("./data/notas_reuniones.txt", encoding='utf-8') as file:
+        texto_reuniones = file.read()
+    with open("./data/sprints.txt", encoding='utf-8') as file:
+        texto_sprints = file.read()
 
-    # Un solo documento con todo el menú
-    menu_text = """
-    Aperitivos:
-    - Bruschetta Clásica: Pan tostado con tomates frescos, ajo, albahaca y aceite de oliva. Precio: $8. Ingredientes: pan, tomate, ajo, albahaca, aceite de oliva.
-    - Tabla de Quesos y Fiambres: Selección de quesos locales e importados con jamón serrano y salame. Precio: $15. Ingredientes: quesos variados, jamón serrano, salame.
-
-    Platos Principales:
-    - Lomo a la Pimienta: Medallón de lomo de 250g con una cremosa salsa de pimienta negra, acompañado de puré de papas. Precio: $28. Ingredientes: lomo, pimienta, crema, puré de papas.
-    - Salmón a la Parrilla con Vegetales: Filete de salmón fresco grillado con una guarnición de vegetales de estación. Precio: $25. Ingredientes: salmón, vegetales de estación.
-    - Risotto de Hongos: Arroz arbóreo cremoso con una mezcla de hongos silvestres y aceite de trufa. Es un plato vegetariano. Precio: $22. Ingredientes: arroz arbóreo, hongos, aceite de trufa, queso parmesano.
-
-    Postres:
-    - Tiramisú: Clásico postre italiano con capas de bizcocho, café, mascarpone y cacao. Precio: $9. Ingredientes: bizcocho, café, queso mascarpone, cacao.
-    - Volcán de Chocolate: Bizcocho tibio de chocolate con centro líquido, servido con helado de vainilla. Precio: $10. Ingredientes: chocolate, helado de vainilla.
-
-    Bebidas:
-    - Vino Malbec (copa): Vino tinto de la casa. Precio: $7.
-    - Limonada con Menta y Jengibre: Bebida refrescante sin alcohol. Precio: $5.
-    """
-    menu_docs = [
+    incidentes_docs = [
         Document(
-            page_content=menu_text,
-            metadata={"source": "menu.txt"}
+            page_content=texto_incidentes,
+            metadata={"source": "incidentes.txt"}
         )
     ]
-    print(f"📄 Menú unificado en un solo documento.")
-
-
-    # Un solo documento con toda la información del negocio
-    negocio_info = """
-    El restaurante La Delicia es propiedad de Antonio Rossi, un chef de renombre con más de 20 años de experiencia en cocina italiana.
-    Ubicación: Av. Italia 1234, San Carlos de Bariloche, Río Negro, Argentina.
-    La Delicia abre de martes a domingo. Horario: 12 PM – 4 PM para el almuerzo, y 8 PM – 11 PM para la cena. Lunes cerrado.
-    Teléfono: +54 294 412-3456
-    Email: reservas@ladelicia.com.ar
-    Especialidad: Cocina italiana tradicional y platos internacionales.
-    Ambiente: Familiar y acogedor, ideal para reuniones y celebraciones.
-    Capacidad: 60 cubiertos.
-    Se aceptan reservas y pagos con tarjeta.
-    """
-    info_docs = [
+    reuniones_docs = [
         Document(
-            page_content=negocio_info,
-            metadata={"source": "info.txt"}
+            page_content=texto_reuniones,
+            metadata={"source": "notas_reuniones.txt"}
         )
     ]
-    print("📄 Información del negocio unificada en un solo documento.")
+    sprints_docs = [
+        Document(
+            page_content=texto_sprints,
+            metadata={"source": "sprints.txt"}
+        )
+    ]
 
-    return menu_docs + info_docs
+    print(f"📄 Texto extraído de los archivos.")
+
+
+
+    return incidentes_docs + reuniones_docs + sprints_docs
 
 # --- 3. CREACIÓN DEL VECTORSTORE PERSISTENTE ---
 
@@ -120,16 +104,16 @@ def create_or_load_vectorstore(documents: list[Document], embedding_model) -> Ch
 # --- 4. DEFINICIÓN DE HERRAMIENTAS ---
 
 def define_tools(vectorstore: Chroma) -> list:
-    """Define las herramientas que el agente mozo podrá utilizar."""
+    """Define las herramientas disponibles en el workflow."""
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2}) # Aumentamos k para más contexto
     
     retriever_tool = create_retriever_tool(
         retriever,
-        name="consultar_menu_y_horarios",
+        name="consultar_registros_y_notas_del_proyecto",
         description="Busca y recupera información sobre los platos del menú, ingredientes, precios, opciones vegetarianas, y también sobre los horarios de apertura del restaurante 'La Delicia'."
     )
     
-    print("🛠️  Herramientas del mozo definidas: consultar_menu_y_horarios, off_topic_tool.")
+    print("🛠️  Herramientas del mozo definidas: consultar_registros_y_notas_del_proyecto.")
     return [retriever_tool]
 
 # --- 5. CONSTRUCCIÓN DEL GRAFO ---
@@ -142,18 +126,17 @@ class AgentState(TypedDict):
 
 # Nodo agente RAG
 def agent_node(state: AgentState, llm):
-    """Invoca al LLM con el rol de mozo para que decida el siguiente paso."""
+    """Invoca al LLM con el rol de agente para que recupere la información de los archivos."""
     system_prompt = """
-    Eres "Bruno", el mozo virtual del restaurante "La Delicia". Eres amable, servicial y eficiente.
-    Tu objetivo es ayudar a los clientes a conocer el menú y responder sus preguntas.
+    Eres "Astor", el asistente virtual asignado al equipo de desarrollo de software "Argentum" para el actual proyecto. Eres amable, servicial y eficiente.
+    Tu objetivo es ayudar a los desarrolladores a conocer los detalles importantes del proyecto que se pudieron haber perdido.
 
     Instrucciones:
-    1.  Saluda al cliente y preséntate cordialmente.
-    2.  Utiliza la herramienta `consultar_menu_y_horarios` para responder CUALQUIER pregunta sobre platos, ingredientes, precios, recomendaciones y horarios.
-    3.  Si el cliente te pide una recomendación (ej. "algo liviano", "un plato sin carne"), usa la herramienta para buscar opciones y luego preséntalas de forma atractiva.
-    4.  Si la pregunta no tiene NADA que ver con el restaurante, el menú o la comida, DEBES usar la herramienta `off_topic_tool`.
-    5.  Basa tus respuestas ÚNICAMENTE en la información que te proporcionan tus herramientas. No inventes platos, precios ni horarios.
-    6.  Sé conciso pero completo en tus respuestas. Si das un precio, menciónalo claramente.
+    1.  Saluda al desarrollador y preséntate cordialmente.
+    2.  Utiliza la herramienta `consultar_registros_y_notas_del_proyecto` para responder CUALQUIER pregunta sobre minutas, registros, eventos, planificaciones o incidentes.
+    3.  Si la pregunta no tiene NADA que ver con el proyecto o el equipo, DEBES responder "Solo puedo responder sobre el proyecto."`.
+    4.  Basa tus respuestas ÚNICAMENTE en la información que te proporcionan tus herramientas. No inventes platos, precios ni horarios.
+    5.  Sé conciso pero completo en tus respuestas, intenta no omitir demasiados detalles.
     """
     messages = [SystemMessage(content=system_prompt)] + state["messages"]
     response = llm.invoke(messages)
@@ -162,7 +145,7 @@ def agent_node(state: AgentState, llm):
 # Nodo para prompts no relacionados al contexto
 def off_topic_node(state: AgentState) -> dict:
     """Returns a default message when the query is unrelated."""
-    message = "Disculpe, como mozo virtual de 'La Delicia', solo puedo responder preguntas sobre nuestro menú y servicios."
+    message = "Disculpe, como asistente solo puedo responder preguntas sobre el proyecto."
     return {"messages": state["messages"] + [HumanMessage(content=message)]}
 
 # Nodo supervisor
@@ -170,9 +153,9 @@ def supervisor_node(state: AgentState, supervisor_llm):
     """Invoca al LLM con el rol de supervisor para que decida el siguiente paso."""
     system_prompt = """
       Eres un supervisor que determina si la consulta del usuario está relacionada
-    con el restaurante o no.
+    con los registros del proyecto de desarrollo asignado a "Argentum" o no.
     Responde en formato JSON con los campos:
-    - next: "rag_agent" si la consulta está relacionada con el menú,
+    - next: "rag_agent" si la consulta está relacionada con el proyecto o sus registros,
         "off_topic" si no lo está.
     - instruction: un mensaje opcional que contenga cualquier instrucción para el siguiente nodo.
 
@@ -211,7 +194,7 @@ def router(state: AgentState) -> str:
 
 
 def build_graph(supervisor_llm, agent_llm, tools_list):
-    """Construye y compila el grafo del sistema multiagente mozo."""
+    """Construye y compila el grafo del sistema multiagente."""
     
     # Declaración de estado a compartir
     graph = StateGraph(AgentState)
@@ -249,7 +232,7 @@ def build_graph(supervisor_llm, agent_llm, tools_list):
     graph.add_edge("off_topic_node", END) #Terminar ciclo al preguntar off_topic
 
 
-    print("🧠 Grafo del mozo virtual construido y compilado.")
+    print("🧠 Grafo del asistente virtual construido y compilado.")
     return graph.compile()
 
 
@@ -293,16 +276,16 @@ if __name__ == "__main__":
     conversation_history = []
     
     print("\n\n" + "="*50)
-    print("      🍝 BIENVENIDO AL RESTAURANTE 'LA DELICIA' 🍝")
+    print("      ¿Te perdiste una reunión? ¿Necesitas saber qué se rompió en el último deploy?")
     print("="*50)
-    print("\nBruno, tu mozo virtual, está listo para atenderte.")
+    print("\nAstor, a tu servicio por cualquier cosa que necesites saber sobre los registros del proyecto.")
     print(" (Escribe 'salir' para terminar la conversación)")
 
     # Bucle principal
     while True:
         query = input("\n👤 Cliente: ")
         if query.lower() in ["exit", "quit", "salir"]:
-            print("\n👋 Bruno: ¡Gracias por tu visita! ¡Vuelve pronto!")
+            print("\n👋 Astor: ¡Gracias por tu visita! ¡Vuelve pronto!")
             break
         
         # Invocamos el agente con el historial completo MÁS la nueva pregunta
@@ -317,4 +300,4 @@ if __name__ == "__main__":
         
         # La respuesta para el usuario es el contenido del último mensaje en el historial.
         final_response = conversation_history[-1].content
-        print(f"\n🤖 Bruno: {final_response}")
+        print(f"\n🤖 Astor: {final_response}")
