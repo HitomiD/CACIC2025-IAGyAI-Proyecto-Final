@@ -232,14 +232,14 @@ def build_graph(supervisor_llm, agent_llm, tools_list):
 
 
     graph.set_entry_point("supervisor_node")
-    '''
+    
     graph.add_conditional_edges(
-        "agent", 
+        "agent_node", 
         should_continue, 
         {"tools": "tools",
          "__end__": END}
     )
-    '''
+    
     # Añadir los bordes condicionales
     graph.add_conditional_edges(
         "supervisor_node",
@@ -287,6 +287,9 @@ if __name__ == "__main__":
 
 
     rag_agent = build_graph(supervisor_llm, rag_agent_llm, tools)
+
+    with open("img/agent_workflow.png", "wb") as f:
+        f.write(rag_agent.get_graph().draw_mermaid_png())
 
      # MODIFICACIÓN: Añadimos una lista para mantener el historial de la conversación.
     conversation_history = []
