@@ -13,8 +13,8 @@ Funcionalidades principales:
 3.  Definición de un LLM (Gemini) con el rol de asistente y de generador de reportes.
 4.  Integración con Notion para la persistencia de los reportes.
 4.  Herramientas:
-    - Un 'retriever' para buscar en el menú.
-    - Una herramienta [NOTION]
+    - Un 'retriever' para buscar en los registros disponibles.
+    - Una herramienta para publicar un reporte en Notion.
 5.  Construcción de un grafo con LangGraph para orquestar la conversación y el uso de herramientas (patrón ReAct).
 6.  Funcionamiento a partir de un bucle iterativo.
 """
@@ -41,6 +41,11 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
+# Dependencias para integración con Notion
+from notion_client import Client 
+from notion_client.errors import APIResponseError
+
+
 # --- 1. CONFIGURACIÓN INICIAL ---
 
 def setup_environment():
@@ -48,6 +53,8 @@ def setup_environment():
     load_dotenv()
     if not os.getenv("GEMINI_API_KEY"):
         raise ValueError("La variable de entorno GEMINI_API_KEY no está definida.")
+    if not os.getenv("NOTION_API_KEY") or not os.getenv("NOTION_DATABASE_ID"):
+        raise ValueError("Las variables NOTION_API_KEY y/o NOTION_DATABASE_ID no están definidas.")
     print("✅ Variables de entorno cargadas correctamente.")
 
 # --- 2. CARGA DE REGISTROS DEL PROYECTO (archivos) ---
@@ -102,16 +109,29 @@ def create_or_load_vectorstore(documents: list[Document], embedding_model) -> Ch
 # --- 4. DEFINICIÓN DE HERRAMIENTAS ---
 
 @tool
-def mcp_notion_send_tool(report_content: str) -> str:
+def notion_persistence_tool(report_content: str) -> str:
     """
-    Simula el envío de un informe de actividad o un resumen a Notion a través de la herramienta MCP.
-    Utiliza esta herramienta solo cuando el usuario pide explícitamente generar y enviar un informe o reporte a Notion.
-    El contenido del informe debe ser un resumen conciso de la conversación o una nota relevante.
+    Envía un reporte de texto a una base de datos de Notion.
+    El contenido del reporte debe ser un resumen o análisis generado por el agente.
     """
-    # En un entorno real, aquí se integraría con el SDK de Notion o una API custom.
-    # Por ahora, simulamos el éxito de la operación.
-    print(f"\n[⚠️  MCP TOOL] Reporte generado y enviado a Notion. Contenido: '{report_content[:50]}...'")
-    return "El informe de la conversación ha sido generado y enviado exitosamente a Notion."
+    try:
+        notion = Client(auth=os.getenv("NOTION_API_KEY"))
+        database_id = os.getenv("NOTION_DATABASE_ID")
+
+        response = notion.pages.create(
+            parent={"database_id": database_id},
+            properties={
+                "Name": {"title": [{"text": {"content": "Reporte de Actividad"}}]},
+                "Description": {"rich_text": [{"text": {"content": report_content[:2000]}}]},  # Notion limit per block
+            },
+        )
+        print("✅ Reporte publicado en Notion con ID:", response["id"])
+        return "El reporte se ha enviado correctamente a Notion."
+
+    except APIResponseError as e:
+        print("❌ Error al enviar el reporte a Notion:", e)
+        return f"Ocurrió un error al enviar el reporte a Notion: {e}"
+    
 
 def define_tools(vectorstore: Chroma) -> list:
     """Define las herramientas disponibles en el workflow."""
@@ -122,8 +142,8 @@ def define_tools(vectorstore: Chroma) -> list:
         name="consultar_registros_y_notas_del_proyecto",
         description="Busca y recupera información sobre los registros de trabajo del equipo en el proyecto actual. "
     )
-    print("🛠️  Herramientas del asistente definidas: consultar_registros_y_notas_del_proyecto, mcp_notion_send_tool.")
-    return [retriever_tool, mcp_notion_send_tool]
+    print("🛠️  Herramientas del asistente definidas: consultar_registros_y_notas_del_proyecto, notion_persistence_tool.")
+    return [retriever_tool, notion_persistence_tool]
 
 # --- 5. CONSTRUCCIÓN DEL GRAFO ---
 
@@ -188,7 +208,7 @@ def report_agent_node(state: AgentState, llm):
     """Invoca al LLM con el rol de agente de reportes para usar la herramienta de Notion."""
     system_prompt = """
     Eres un Agente de Reportes. Tu única función es generar un resumen de la conversación
-    o una nota relevante y enviarla a Notion usando la herramienta `mcp_notion_send_tool`.
+    o una nota relevante y enviarla a Notion usando la herramienta `notion_persistence_tool`.
     El contenido del reporte debe ser profesional y conciso e incluir un breve análisis al final.
     Luego de usar la herramienta, el proceso debe terminar. No te presentes.
     """
