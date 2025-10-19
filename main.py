@@ -1,5 +1,3 @@
-# Ejecutar en terminal:
-# python3 clase-03/04_Rag_mozo.py
 
 
 """
@@ -52,7 +50,7 @@ def setup_environment():
         raise ValueError("La variable de entorno GEMINI_API_KEY no está definida.")
     print("✅ Variables de entorno cargadas correctamente.")
 
-# --- 2. CARGA DE DATOS DEL RESTAURANTE (MENÚ) ---
+# --- 2. CARGA DE REGISTROS DEL PROYECTO (archivos) ---
 
 def load_documents() -> list[Document]:
     """Carga los documentos que representan los registros del proyecto."""
@@ -103,6 +101,18 @@ def create_or_load_vectorstore(documents: list[Document], embedding_model) -> Ch
 
 # --- 4. DEFINICIÓN DE HERRAMIENTAS ---
 
+@tool
+def mcp_notion_send_tool(report_content: str) -> str:
+    """
+    Simula el envío de un informe de actividad o un resumen a Notion a través de la herramienta MCP.
+    Utiliza esta herramienta solo cuando el usuario pide explícitamente generar y enviar un informe o reporte a Notion.
+    El contenido del informe debe ser un resumen conciso de la conversación o una nota relevante.
+    """
+    # En un entorno real, aquí se integraría con el SDK de Notion o una API custom.
+    # Por ahora, simulamos el éxito de la operación.
+    print(f"\n[⚠️  MCP TOOL] Reporte generado y enviado a Notion. Contenido: '{report_content[:50]}...'")
+    return "El informe de la conversación ha sido generado y enviado exitosamente a Notion."
+
 def define_tools(vectorstore: Chroma) -> list:
     """Define las herramientas disponibles en el workflow."""
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2}) # Aumentamos k para más contexto
@@ -110,11 +120,10 @@ def define_tools(vectorstore: Chroma) -> list:
     retriever_tool = create_retriever_tool(
         retriever,
         name="consultar_registros_y_notas_del_proyecto",
-        description="Busca y recupera información sobre los platos del menú, ingredientes, precios, opciones vegetarianas, y también sobre los horarios de apertura del restaurante 'La Delicia'."
+        description="Busca y recupera información sobre los registros de trabajo del equipo en el proyecto actual. "
     )
-    
-    print("🛠️  Herramientas del mozo definidas: consultar_registros_y_notas_del_proyecto.")
-    return [retriever_tool]
+    print("🛠️  Herramientas del asistente definidas: consultar_registros_y_notas_del_proyecto, mcp_notion_send_tool.")
+    return [retriever_tool, mcp_notion_send_tool]
 
 # --- 5. CONSTRUCCIÓN DEL GRAFO ---
 
@@ -152,11 +161,12 @@ def off_topic_node(state: AgentState) -> dict:
 def supervisor_node(state: AgentState, supervisor_llm):
     """Invoca al LLM con el rol de supervisor para que decida el siguiente paso."""
     system_prompt = """
-      Eres un supervisor que determina si la consulta del usuario está relacionada
-    con los registros del proyecto de desarrollo asignado a "Argentum" o no.
+      Eres un supervisor que determina la próxima acción a partir del prompt del usuario.
+      Debes determinar si el prompt es irrelevante, requiere solo recuperar información o
+      si el usuario está solicitando un reporte para enviar a Notion de manera explícita.
     Responde en formato JSON con los campos:
     - next: "rag_agent" si la consulta está relacionada con el proyecto o sus registros,
-        "off_topic" si no lo está.
+        "off_topic" si no lo está, "report_agent" si el usuario solicitó de manera EXPLÍCITA y LITERAL un reporte para enviar a NOTION.
     - instruction: un mensaje opcional que contenga cualquier instrucción para el siguiente nodo.
 
     """
@@ -172,6 +182,20 @@ def supervisor_node(state: AgentState, supervisor_llm):
         "next": response.next,
         "instruction": response.instruction
     }
+
+# Nodo Report Agent
+def report_agent_node(state: AgentState, llm):
+    """Invoca al LLM con el rol de agente de reportes para usar la herramienta de Notion."""
+    system_prompt = """
+    Eres un Agente de Reportes. Tu única función es generar un resumen de la conversación
+    o una nota relevante y enviarla a Notion usando la herramienta `mcp_notion_send_tool`.
+    El contenido del reporte debe ser profesional y conciso e incluir un breve análisis al final.
+    Luego de usar la herramienta, el proceso debe terminar. No te presentes.
+    """
+    # El historial completo de mensajes es el contexto para el reporte.
+    messages = [SystemMessage(content=system_prompt)] + state["messages"]
+    response = llm.invoke(messages)
+    return {"messages": [response]}
 
 
 # Paso 4: Definir el enrutamiento/lógica condicional y los nodos
@@ -189,11 +213,13 @@ def router(state: AgentState) -> str:
         return "rag_agent"
     elif state["next"] == "off_topic":
         return "off_topic_node"
+    elif state["next"] == "report_agent":
+        return "report_agent_node"
     else:
         return "__end__"
 
 
-def build_graph(supervisor_llm, agent_llm, tools_list):
+def build_graph(supervisor_llm, agent_llm, report_llm, tools_list):
     """Construye y compila el grafo del sistema multiagente."""
     
     # Declaración de estado a compartir
@@ -202,6 +228,7 @@ def build_graph(supervisor_llm, agent_llm, tools_list):
     # Añadir todos los nodos al grafo
     graph.add_node("supervisor_node", lambda state: supervisor_node(state, supervisor_llm))
     graph.add_node("agent_node", lambda state: agent_node(state, agent_llm))
+    graph.add_node("report_agent_node", lambda state: report_agent_node(state, report_llm))
     graph.add_node("tools", ToolNode(tools_list))
     graph.add_node("off_topic_node", off_topic_node)
 
@@ -216,12 +243,21 @@ def build_graph(supervisor_llm, agent_llm, tools_list):
          "__end__": END}
     )
 
+    # Aristas condicionales del agente de reporte
+    graph.add_conditional_edges(
+        "report_agent_node", 
+        should_continue, 
+        {"tools": "tools",
+         "__end__": END}
+    )
+
     # Aristas condicionales del supervisor
     graph.add_conditional_edges(
         "supervisor_node",
         router,
         {
             "rag_agent": "agent_node",
+            "report_agent_node": "report_agent_node",
             "off_topic_node": "off_topic_node", 
             "__end__": END
         }
@@ -230,7 +266,7 @@ def build_graph(supervisor_llm, agent_llm, tools_list):
     #Añadir aristas no condicionales
     graph.add_edge("tools", "agent_node") #Volver al agente luego de ejecutar herramienta
     graph.add_edge("off_topic_node", END) #Terminar ciclo al preguntar off_topic
-
+    graph.add_edge("report_agent_node", END)
 
     print("🧠 Grafo del asistente virtual construido y compilado.")
     return graph.compile()
@@ -243,7 +279,7 @@ if __name__ == "__main__":
     
     # Pydantic model for supervisor output schema (required by LangChain Gemini)
     class SupervisorOutput(BaseModel):
-        next: Literal["rag_agent", "off_topic"]
+        next: Literal["rag_agent", "report_agent", "off_topic"]
         instruction: str
 
     # Definicion de modelos para cada agente
@@ -263,9 +299,10 @@ if __name__ == "__main__":
     # Definición y binding de tools
     tools = define_tools(vectorstore)
     rag_agent_llm = llm.bind_tools(tools)
+    report_agent_llm = llm.bind_tools(tools)
 
 
-    rag_agent = build_graph(supervisor_llm, rag_agent_llm, tools)
+    rag_agent = build_graph(supervisor_llm, rag_agent_llm, report_agent_llm, tools)
 
     #Generar y guardar imagen en ./img
     with open("img/agent_workflow.png", "wb") as f:
@@ -275,9 +312,9 @@ if __name__ == "__main__":
     # Lista para mantener el historial de la conversación.
     conversation_history = []
     
-    print("\n\n" + "="*50)
+    print("\n\n" + "="*100)
     print("      ¿Te perdiste una reunión? ¿Necesitas saber qué se rompió en el último deploy?")
-    print("="*50)
+    print("="*100)
     print("\nAstor, a tu servicio por cualquier cosa que necesites saber sobre los registros del proyecto.")
     print(" (Escribe 'salir' para terminar la conversación)")
 
