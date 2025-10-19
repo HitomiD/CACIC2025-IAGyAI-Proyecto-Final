@@ -1,5 +1,3 @@
-
-
 """
 Este script implementa un agente conversacional que simula ser un asistente virtual
 llamado "Astor" para un equipo de desarrollo de nombre clave "Argentum".
@@ -48,6 +46,7 @@ from notion_client.errors import APIResponseError
 
 # --- 1. CONFIGURACIÓN INICIAL ---
 
+# Lectura de variables de entorno en .env
 def setup_environment():
     """Carga las variables de entorno desde el archivo .env."""
     load_dotenv()
@@ -56,6 +55,7 @@ def setup_environment():
     if not os.getenv("NOTION_API_KEY") or not os.getenv("NOTION_DATABASE_ID"):
         raise ValueError("Las variables NOTION_API_KEY y/o NOTION_DATABASE_ID no están definidas.")
     print("✅ Variables de entorno cargadas correctamente.")
+
 
 # --- 2. CARGA DE REGISTROS DEL PROYECTO (archivos) ---
 
@@ -90,9 +90,8 @@ def load_documents() -> list[Document]:
 
     print(f"📄 Texto extraído de los archivos.")
 
-
-
     return incidentes_docs + reuniones_docs + sprints_docs
+
 
 # --- 3. CREACIÓN DEL VECTORSTORE PERSISTENTE ---
 
@@ -114,10 +113,10 @@ def notion_persistence_tool(report_content: str) -> str:
     Envía un reporte de texto a una base de datos de Notion.
     El contenido del reporte debe ser un resumen o análisis generado por el agente.
     """
-    try:
+    try: # Intento de conexión
         notion = Client(auth=os.getenv("NOTION_API_KEY"))
         database_id = os.getenv("NOTION_DATABASE_ID")
-
+        # Ante una respuesta se crea el registro nuevo
         response = notion.pages.create(
             parent={"database_id": database_id},
             properties={
@@ -132,7 +131,7 @@ def notion_persistence_tool(report_content: str) -> str:
         print("❌ Error al enviar el reporte a Notion:", e)
         return f"Ocurrió un error al enviar el reporte a Notion: {e}"
     
-
+# Método para definir otras herramientas y retornar la lista completa
 def define_tools(vectorstore: Chroma) -> list:
     """Define las herramientas disponibles en el workflow."""
     retriever = vectorstore.as_retriever(search_kwargs={"k": 2}) # Aumentamos k para más contexto
@@ -144,6 +143,7 @@ def define_tools(vectorstore: Chroma) -> list:
     )
     print("🛠️  Herramientas del asistente definidas: consultar_registros_y_notas_del_proyecto, notion_persistence_tool.")
     return [retriever_tool, notion_persistence_tool]
+
 
 # --- 5. CONSTRUCCIÓN DEL GRAFO ---
 
@@ -171,7 +171,7 @@ def agent_node(state: AgentState, llm):
     response = llm.invoke(messages)
     return {"messages": [response]}
 
-# Nodo para prompts no relacionados al contexto
+# Nodo para prompts no relacionados/irrelevantes al contexto
 def off_topic_node(state: AgentState) -> dict:
     """Returns a default message when the query is unrelated."""
     message = "Disculpe, como asistente solo puedo responder preguntas sobre el proyecto."
@@ -190,10 +190,8 @@ def supervisor_node(state: AgentState, supervisor_llm):
     - instruction: un mensaje opcional que contenga cualquier instrucción para el siguiente nodo.
 
     """
-    
      # Combina el prompt de sistema con el historial de mensajes
     supervisor_messages = [SystemMessage(content=system_prompt)] + state["messages"]
-
 
     # Llama al LLM supervisor con el output estructurado
     response: SupervisorOutput = supervisor_llm.invoke(supervisor_messages)
@@ -207,10 +205,13 @@ def supervisor_node(state: AgentState, supervisor_llm):
 def report_agent_node(state: AgentState, llm):
     """Invoca al LLM con el rol de agente de reportes para usar la herramienta de Notion."""
     system_prompt = """
-    Eres un Agente de Reportes. Tu única función es generar un resumen de la conversación
-    o una nota relevante y enviarla a Notion usando la herramienta `notion_persistence_tool`.
+    Eres un Agente de Reportes, no debes presentarte. Tu única función es generar un resumen de lo que el usuario
+    solicite siempre y cuando esté relacionado a los registros del proyecto de desarrollo con
+    la opción de enviarlo a Notion usando la herramienta `notion_persistence_tool`.
+    Si el usuario no solicita enviar el reporte a notion de forma explícita y literal debes
+    recordarle que tienes la capacidad de enviarlo si así lo pidiera.
     El contenido del reporte debe ser profesional y conciso e incluir un breve análisis al final.
-    Luego de usar la herramienta, el proceso debe terminar. No te presentes.
+    Luego de usar la herramienta, el proceso debe terminar.
     """
     # El historial completo de mensajes es el contexto para el reporte.
     messages = [SystemMessage(content=system_prompt)] + state["messages"]
@@ -218,7 +219,7 @@ def report_agent_node(state: AgentState, llm):
     return {"messages": [response]}
 
 
-# Paso 4: Definir el enrutamiento/lógica condicional y los nodos
+# Definición del enrutamiento condicional y los nodos
 
 def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
     """Determina si se debe llamar a una herramienta o si el flujo ha terminado."""
@@ -292,6 +293,7 @@ def build_graph(supervisor_llm, agent_llm, report_llm, tools_list):
     return graph.compile()
 
 
+
 # --- 6. EJECUCIÓN PRINCIPAL ---
 
 if __name__ == "__main__":
@@ -340,9 +342,9 @@ if __name__ == "__main__":
 
     # Bucle principal
     while True:
-        query = input("\n👤 Cliente: ")
+        query = input("\n👤 Usuario: ")
         if query.lower() in ["exit", "quit", "salir"]:
-            print("\n👋 Astor: ¡Gracias por tu visita! ¡Vuelve pronto!")
+            print("\n👋 Astor: Si necesitas algo mas no dudes en consultar.")
             break
         
         # Invocamos el agente con el historial completo MÁS la nueva pregunta
