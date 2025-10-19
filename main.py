@@ -3,19 +3,16 @@
 
 
 """
-Este script implementa un agente conversacional que simula ser un mozo virtual
-llamado "Bruno" para el restaurante "La Delicia". Utiliza LangGraph y un sistema RAG.
+Este script implementa un agente conversacional que simula ser un asistente virtual
+llamado "Astor" para un equipo de desarrollo ubicado en Argentina conocido internamente como "Argentum".
 
 Funcionalidades principales:
-1.  Carga de un menú detallado y datos del restaurante como documentos.
-2.  Creación de una base de datos vectorial (Chroma) persistente con la información
-    del menú para realizar consultas semánticas.
-3.  Definición de un LLM (Gemini 1.5 Flash) con el rol de un mozo.
-4.  Herramientas:
-    - Un 'retriever' para buscar en el menú.
-    - Una herramienta 'off_topic' para manejar preguntas no relacionadas.
+1.  Carga de registros del proyecto como Sprints, Incidentes, Reuniones, etc desde documentos de texto plano (incluídos en "data").
+2.  Base de datos vectorial (Chroma) persistente con la información
+    de dichos registros para realizar consultas semánticas.
+
 5.  Construcción de un grafo con LangGraph para orquestar la conversación y el uso de herramientas (patrón ReAct).
-6.  Un bucle interactivo para chatear con "Bruno".
+6.  Un bucle interactivo para conversar con "Astor".
 """
 import os
 from typing import Sequence, Annotated, TypedDict, Literal
@@ -40,6 +37,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
+
 # --- 1. CONFIGURACIÓN INICIAL ---
 
 def setup_environment():
@@ -49,61 +47,10 @@ def setup_environment():
         raise ValueError("La variable de entorno GEMINI_API_KEY no está definida.")
     print("✅ Variables de entorno cargadas correctamente.")
 
-# --- 2. CARGA DE DATOS DEL RESTAURANTE (MENÚ) ---
 
-def load_documents() -> list[Document]:
-    """Carga los documentos que representan el menú y la información del restaurante."""
-    
-
-    # Un solo documento con todo el menú
-    menu_text = """
-    Aperitivos:
-    - Bruschetta Clásica: Pan tostado con tomates frescos, ajo, albahaca y aceite de oliva. Precio: $8. Ingredientes: pan, tomate, ajo, albahaca, aceite de oliva.
-    - Tabla de Quesos y Fiambres: Selección de quesos locales e importados con jamón serrano y salame. Precio: $15. Ingredientes: quesos variados, jamón serrano, salame.
-
-    Platos Principales:
-    - Lomo a la Pimienta: Medallón de lomo de 250g con una cremosa salsa de pimienta negra, acompañado de puré de papas. Precio: $28. Ingredientes: lomo, pimienta, crema, puré de papas.
-    - Salmón a la Parrilla con Vegetales: Filete de salmón fresco grillado con una guarnición de vegetales de estación. Precio: $25. Ingredientes: salmón, vegetales de estación.
-    - Risotto de Hongos: Arroz arbóreo cremoso con una mezcla de hongos silvestres y aceite de trufa. Es un plato vegetariano. Precio: $22. Ingredientes: arroz arbóreo, hongos, aceite de trufa, queso parmesano.
-
-    Postres:
-    - Tiramisú: Clásico postre italiano con capas de bizcocho, café, mascarpone y cacao. Precio: $9. Ingredientes: bizcocho, café, queso mascarpone, cacao.
-    - Volcán de Chocolate: Bizcocho tibio de chocolate con centro líquido, servido con helado de vainilla. Precio: $10. Ingredientes: chocolate, helado de vainilla.
-
-    Bebidas:
-    - Vino Malbec (copa): Vino tinto de la casa. Precio: $7.
-    - Limonada con Menta y Jengibre: Bebida refrescante sin alcohol. Precio: $5.
-    """
-    menu_docs = [
-        Document(
-            page_content=menu_text,
-            metadata={"source": "menu.txt"}
-        )
-    ]
-    print(f"📄 Menú unificado en un solo documento.")
+# --- 2. CARGA DE DATOS DE LOS REGISTROS (Reuniones, incidentes, etc.) ---
 
 
-    # Un solo documento con toda la información del negocio
-    negocio_info = """
-    El restaurante La Delicia es propiedad de Antonio Rossi, un chef de renombre con más de 20 años de experiencia en cocina italiana.
-    Ubicación: Av. Italia 1234, San Carlos de Bariloche, Río Negro, Argentina.
-    La Delicia abre de martes a domingo. Horario: 12 PM – 4 PM para el almuerzo, y 8 PM – 11 PM para la cena. Lunes cerrado.
-    Teléfono: +54 294 412-3456
-    Email: reservas@ladelicia.com.ar
-    Especialidad: Cocina italiana tradicional y platos internacionales.
-    Ambiente: Familiar y acogedor, ideal para reuniones y celebraciones.
-    Capacidad: 60 cubiertos.
-    Se aceptan reservas y pagos con tarjeta.
-    """
-    info_docs = [
-        Document(
-            page_content=negocio_info,
-            metadata={"source": "info.txt"}
-        )
-    ]
-    print("📄 Información del negocio unificada en un solo documento.")
-
-    return menu_docs + info_docs
 
 # --- 3. CREACIÓN DEL VECTORSTORE PERSISTENTE ---
 
@@ -117,6 +64,7 @@ def create_or_load_vectorstore(documents: list[Document], embedding_model) -> Ch
     print("✅ Vectorstore listo.")
     return vectorstore
 
+
 # --- 4. DEFINICIÓN DE HERRAMIENTAS ---
 
 @tool
@@ -127,15 +75,16 @@ def off_topic_tool():
     return "Disculpe, solo puedo responder sobre los registros del proyecto: puede consultar sobre ellos y solicitar un análisis o la generación de un reporte."
 
 
-# --- 5. LÓGICA Y CONSTRUCCIÓN DEL GRAFO (AGENTE MOZO) ---
+
+# --- 5. DEFINICIÓN DE STATE Y AGENTES ---
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
 def agent_node(state: AgentState, llm):
-    """Invoca al LLM con el rol de mozo para que decida el siguiente paso."""
+    """Invoca al LLM con el rol de asistente para que decida el siguiente paso."""
     system_prompt = """
-    Eres "Arandú", el asistente del equipo de desarrollo de software "Argentum". Eres servicial, conciso y eficiente.
+    Eres "Astor", el asistente del equipo de desarrollo de software "Argentum". Eres servicial, conciso y eficiente.
     Tu objetivo es ayudar al equipo a acceder a los documentos y registros del proyecto de desarrollo actual.
 
     Instrucciones:
@@ -148,6 +97,10 @@ def agent_node(state: AgentState, llm):
     response = llm.invoke(messages)
     return {"messages": [response]}
 
+
+# --- 6. LÓGICA Y CONSTRUCCIÓN DEL GRAFO (AGENTE ASISTENTE) ---
+
+
 def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
     """Determina si se debe llamar a una herramienta o si el flujo ha terminado."""
     if state["messages"][-1].tool_calls:
@@ -155,7 +108,7 @@ def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
     return "__end__"
 
 def build_graph(llm_with_tools, tools_list):
-    """Construye y compila el grafo del agente mozo."""
+    """Construye y compila el grafo del agente asistente."""
     graph = StateGraph(AgentState)
 
     graph.add_node("agent", lambda state: agent_node(state, llm_with_tools))
@@ -167,10 +120,11 @@ def build_graph(llm_with_tools, tools_list):
     )
     graph.add_edge("tools", "agent")
 
-    print("🧠 Grafo del mozo virtual construido y compilado.")
+    print("🧠 Grafo del asistente virtual construido y compilado.")
     return graph.compile()
 
-# --- 6. EJECUCIÓN PRINCIPAL ---
+
+# --- 7. EJECUCIÓN PRINCIPAL ---
 
 if __name__ == "__main__":
     setup_environment()
@@ -181,34 +135,33 @@ if __name__ == "__main__":
     embedding_model = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001",
                                                    google_api_key=os.getenv("GEMINI_API_KEY"))
 
-    documents = load_documents()
-    vectorstore = create_or_load_vectorstore(documents, embedding_model)
-    tools = [off_topic_tool]
+    supervisor_tools = [off_topic_tool]
     
-    llm_with_tools = llm.bind_tools(tools)
+    supervisor_llm_with_tools = llm.bind_tools(supervisor_tools)
 
-    rag_agent = build_graph(llm_with_tools, tools)
+    multi_agent = build_graph(supervisor_llm_with_tools, supervisor_tools)
 
      # MODIFICACIÓN: Añadimos una lista para mantener el historial de la conversación.
     conversation_history = []
     
     print("\n\n" + "="*50)
-    print("      🍝 BIENVENIDO AL RESTAURANTE 'LA DELICIA' 🍝")
+    print("      REGISTROS DEL PROYECTO DE DESARROLLO - ARGENTUM")
     print("="*50)
-    print("\nBruno, tu mozo virtual, está listo para atenderte.")
+    print("\n¿Te perdiste una reunión? ¿Necesitas una opinión o un reporte de lo que se rompió en el último deploy?")
+    print("Astor está listo para ayudarte.")
     print(" (Escribe 'salir' para terminar la conversación)")
 
     while True:
         query = input("\n👤 Cliente: ")
         if query.lower() in ["exit", "quit", "salir"]:
-            print("\n👋 Bruno: ¡Gracias por tu visita! ¡Vuelve pronto!")
+            print("\n👋 Astor: Espero haberte ayudado, si necesitas algo mas no dudes en consultarme.")
             break
         
         # Invocamos el agente con el historial completo MÁS la nueva pregunta
         # para que el agente tenga contexto de la conversación.
 
         conversation_history.append(HumanMessage(content=query))
-        result = rag_agent.invoke({"messages": conversation_history})
+        result = multi_agent.invoke({"messages": conversation_history})
     
         # La salida del grafo (`result`) contiene el estado final, que es la lista
         # completa de mensajes de la ejecución. La guardamos como nuestro nuevo historial.
@@ -216,4 +169,4 @@ if __name__ == "__main__":
         
         # La respuesta para el usuario es el contenido del último mensaje en el historial.
         final_response = conversation_history[-1].content
-        print(f"\n🤖 Bruno: {final_response}")
+        print(f"\n🤖 Astor: {final_response}")
