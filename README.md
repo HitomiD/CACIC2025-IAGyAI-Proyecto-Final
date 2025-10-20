@@ -21,3 +21,7 @@ El sistema multiagente desarrollado consiste en un agente supervisor, un agente 
  - El sistema fue desarrollado en Python 3.13.7 y no fue probado en otras versiones.
  - Se deben instalar todas las dependencias listadas en el archivo requirements.txt con el comando "pip install -r requirements.txt" estando en el directorio raíz del proyecto (se recomienda crear un entorno virtual con " python -m venv .venv" para esto).
  - se deben configurar las variables de entorno en el archivo .env que incluyen las credenciales de Gemini, langsmith y Notion. Las credenciales de Langsmith y Notion (y la página web de Notion en la que se registran los informes) serán provistas por medio de los archivos que acompañan a esta entrega en la plataforma del curso.
+
+## Extras:
+ - Enlace a la página pública de Notion: https://enchanting-bard-465.notion.site/29125fd6a71e80678adcde78baddb666?v=29125fd6a71e8013acb4000cde6ce936&pvs=73
+ - Enlace a la Project Run púnlica de Langsmith: https://smith.langchain.com/public/273eb0fd-2c70-4585-9937-cbd2d51b9843/r
