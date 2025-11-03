@@ -4,8 +4,8 @@ Proyecto final para el curso "IA Generativa y Agentes Inteligentes" de la Escuel
 
 Integrantes del grupo:
 
-- Debernardis Kaamil
 - Diaconchuk Hitomi
+- Debernardis Kaamil
 - Mella Rabinovich Fabian Ariel
 - Pachano Blas
 
@@ -25,4 +25,4 @@ El sistema multiagente desarrollado consiste en un agente supervisor, un agente 
 
 ## Extras:
  - Enlace a la página pública de Notion: https://enchanting-bard-465.notion.site/29125fd6a71e80678adcde78baddb666?v=29125fd6a71e8013acb4000cde6ce936&pvs=73
- - Enlace a la Project Run púnlica de Langsmith: https://smith.langchain.com/public/273eb0fd-2c70-4585-9937-cbd2d51b9843/r
+ - Enlace a la Project Run pública de Langsmith: https://smith.langchain.com/public/273eb0fd-2c70-4585-9937-cbd2d51b9843/r
