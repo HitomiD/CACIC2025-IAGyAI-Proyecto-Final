@@ -1,4 +1,5 @@
-# CACIC2025-IAGyAI-Proyecto-Final
+# ai-agent-cacic2025
+
 Proyecto final para el curso "IA Generativa y Agentes Inteligentes" de la Escuela Internacional del CACIC 2025.
 
 Integrantes del grupo:
