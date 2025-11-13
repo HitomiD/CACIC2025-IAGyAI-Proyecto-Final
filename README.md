@@ -2,12 +2,6 @@
 
 Proyecto final para el curso "IA Generativa y Agentes Inteligentes" de la Escuela Internacional del CACIC 2025.
 
-Integrantes del grupo:
-
-- Diaconchuk Hitomi
-- Debernardis Kaamil
-- Mella Rabinovich Fabian Ariel
-- Pachano Blas
 
 ## Sobre el sistema multiagente:
 
